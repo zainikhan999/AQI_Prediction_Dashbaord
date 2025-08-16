@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import hopsworks
 import os
-
-
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -51,11 +49,38 @@ latest_preds = latest_preds.sort_values("forecast_date")
 st.title("🌍 AQI Forecast Dashboard")
 st.write("Showing the latest forecast from model")
 
+# Show AQI explanation
+st.markdown("""
+**Note:** The United States Air Quality Index (AQI) ranges are:
+- 0-50: Good 🟢
+- 51-100: Moderate 🟡
+- 101-150: Unhealthy for Sensitive Groups 🟠
+- 151-200: Unhealthy 🔴
+- 201-300: Very Unhealthy 🟣
+- 301-500: Hazardous ⚫
+""")
+
 # Show latest prediction date/time
 st.info(f"Latest prediction run: {latest_run_time}")
 
-# Display table
-st.dataframe(latest_preds[['forecast_date', 'us_aqi']])
+# === Add timestamp selection ===
+all_timestamps = latest_preds['forecast_date'].dt.strftime('%Y-%m-%d %H:%M:%S').unique()
 
-# Optional: Plot
-st.line_chart(latest_preds.set_index("forecast_date")["us_aqi"])
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.selectbox("Select start time:", all_timestamps)
+with col2:
+    end_date = st.selectbox("Select end time:", all_timestamps, index=len(all_timestamps)-1)
+
+# Filter by user selection
+mask = (latest_preds['forecast_date'] >= pd.to_datetime(start_date)) & (latest_preds['forecast_date'] <= pd.to_datetime(end_date))
+filtered_preds = latest_preds[mask]
+
+# Display table
+st.dataframe(filtered_preds[['forecast_date', 'us_aqi']])
+
+# Plot chart if filtered data exists
+if not filtered_preds.empty:
+    st.line_chart(filtered_preds.set_index("forecast_date")["us_aqi"])
+else:
+    st.warning("No data available for the selected time range.")
