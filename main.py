@@ -113,9 +113,6 @@ if all_ts:
     st.subheader("Filtered predictions")
     st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
 
-    st.subheader("Filtered predictions")
-    st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
-
     if not latest_preds.empty:
         now = pd.Timestamp.utcnow()
 
