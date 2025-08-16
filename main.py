@@ -109,18 +109,17 @@ if all_ts:
     st.subheader("Filtered predictions")
     st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
 
-    # === Get latest forecasted AQI ===
     if not latest_preds.empty:
-         latest_forecast = latest_preds.iloc[0]  # since it's sorted by datetime
-         st.metric(
-                "Current Forecasted AQI",
-                f"{latest_forecast['prediction']:.0f}",
-                help=f"Forecasted for {latest_forecast['datetime_utc']}"
-    )
+        latest_forecast = latest_preds.iloc[0]  # since it's sorted by datetime
+        st.metric(
+            "Current Forecasted AQI",
+            f"{latest_forecast['us_aqi']}",
+            help=f"Forecasted for {latest_forecast['forecast_date']}"
+        )
 
-
-        # --- Plot with hover showing both timestamp & AQI ---
-    fig = px.line(
+    # --- Plot with hover showing both timestamp & AQI ---
+    if not filtered.empty:
+        fig = px.line(
             filtered,
             x="forecast_date",
             y="us_aqi",
@@ -130,7 +129,6 @@ if all_ts:
             hover_data={"forecast_date": True, "us_aqi": True, "category": True}
         )
         st.plotly_chart(fig, use_container_width=True)
-
     else:
         st.warning("No data available for the selected time range.")
 else:
