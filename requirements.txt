@@ -3,3 +3,4 @@ hopsworks[python]
 pandas
 python-dotenv
 matplotlib
+plotly
