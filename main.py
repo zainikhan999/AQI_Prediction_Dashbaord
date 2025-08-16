@@ -106,6 +106,12 @@ if all_ts:
     # Filter and display
     mask = (latest_preds["forecast_date"] >= start_ts) & (latest_preds["forecast_date"] <= end_ts)
     filtered = latest_preds.loc[mask]
+    filtered = filtered.reset_index(drop=True)
+    filtered.index += 1   # Start index at 1 instead of 0
+    filtered.index.name = "Index"
+
+    st.subheader("Filtered predictions")
+    st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
 
     st.subheader("Filtered predictions")
     st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
