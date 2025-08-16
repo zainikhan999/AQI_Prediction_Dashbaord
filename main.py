@@ -1,115 +1,64 @@
 import streamlit as st
 import pandas as pd
-import hopsworks
-import os
-from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
 
-# --- Load environment variables from .env
-load_dotenv()
-API_KEY = os.getenv("HOPSWORKS_API_KEY")
+# === Load predictions (replace with your actual file or DB fetch) ===
+df = pd.read_csv("predictions.csv")
 
-# --- Connect to Hopsworks ---
-project = hopsworks.login(api_key_value=API_KEY, project="weather_aqi")
-fs = project.get_feature_store()
+# Ensure datetime fields are parsed
+df['datetime_utc'] = pd.to_datetime(df['datetime_utc'])
+df['prediction_date'] = pd.to_datetime(df['prediction_date'])
 
-# Load predictions feature group
-fg = fs.get_feature_group(name="aqi_predictions", version=1)
+# === Keep only the latest prediction run ===
+latest_run_time = df['prediction_date'].max()
+latest_preds = df[df['prediction_date'] == latest_run_time].copy()
 
-# Read as dataframe
-df = fg.read()
+# === Filter: Only show 1h to 72h ahead from now ===
+now = pd.Timestamp.utcnow()
+time_horizon = now + timedelta(hours=72)
 
-# --- Rename columns ---
-df = df.rename(columns={
-    "datetime": "forecast_date",
-    "datetime_utc": "forecast_date_utc",
-    "predicted_us_aqi": "us_aqi",
-    "prediction_date": "prediction_time",
-    "model_version": "model_version",
-})
+filtered_preds = latest_preds[
+    (latest_preds['datetime_utc'] > now) &
+    (latest_preds['datetime_utc'] <= time_horizon)
+].sort_values("datetime_utc")
 
-# --- Parse and convert to Asia/Karachi robustly ---
-# Using utc=True makes both naive and tz-aware timestamps end up tz-aware, then we convert to PKT
-for col in ["forecast_date", "forecast_date_utc", "prediction_time"]:
-    df[col] = pd.to_datetime(df[col], utc=True, errors="coerce").dt.tz_convert("Asia/Karachi")
+# === Streamlit UI ===
+st.title("🌍 Air Quality Forecast (72 Hours Ahead)")
 
-# --- Keep only latest prediction run ---
-latest_run_time = df["prediction_time"].max()
-latest_preds = df[df["prediction_time"] == latest_run_time].copy()
-latest_preds = latest_preds.sort_values("forecast_date")
+st.markdown("""
+This dashboard shows **AQI forecasts** for the next 72 hours, starting from the current hour.
+- **Good (0–50)** 🟢  
+- **Moderate (51–100)** 🟡  
+- **Unhealthy for Sensitive (101–150)** 🟠  
+- **Unhealthy (151–200)** 🔴  
+- **Very Unhealthy (201–300)** 🟣  
+- **Hazardous (301–500)** ⚫
+""")
 
-# --- Helper: AQI category ---
-def aqi_category(aqi: float) -> str:
-    if aqi <= 50:
-        return "Good"
-    elif aqi <= 100:
-        return "Moderate"
-    elif aqi <= 150:
-        return "Unhealthy for Sensitive Groups"
-    elif aqi <= 200:
-        return "Unhealthy"
-    elif aqi <= 300:
-        return "Very Unhealthy"
-    return "Hazardous"
-
-latest_preds["category"] = latest_preds["us_aqi"].apply(aqi_category)
-
-# --- UI ---
-st.title("🌍 AQI Forecast Dashboard")
-st.write("Showing the latest forecast from model (times in Asia/Karachi · PKT)")
-
-# AQI legend
-st.markdown(
-    """
-**Note:** The United States Air Quality Index (AQI) ranges are:
-- 0–50: Good 🟢
-- 51–100: Moderate 🟡
-- 101–150: Unhealthy for Sensitive Groups 🟠
-- 151–200: Unhealthy 🔴
-- 201–300: Very Unhealthy 🟣
-- 301–500: Hazardous ⚫
-"""
-)
-
-# Latest run info
-st.info(f"Latest prediction run: {latest_run_time}")
-
-# --- Time range selectors (tz-aware objects, no string parsing) ---
-all_ts = list(latest_preds["forecast_date"].unique())
-all_ts.sort()
-
-col1, col2 = st.columns(2)
-with col1:
-    start_ts = st.selectbox(
-        "Start time",
-        options=all_ts,
-        index=0,
-        format_func=lambda x: x.strftime("%Y-%m-%d %H:%M:%S %Z"),
-    )
-with col2:
-    end_ts = st.selectbox(
-        "End time",
-        options=all_ts,
-        index=len(all_ts) - 1,
-        format_func=lambda x: x.strftime("%Y-%m-%d %H:%M:%S %Z"),
-    )
-
-# Ensure valid order
-if start_ts > end_ts:
-    st.warning("Start time is after end time — swapping them.")
-    start_ts, end_ts = end_ts, start_ts
-
-# Filter and display
-mask = (latest_preds["forecast_date"] >= start_ts) & (latest_preds["forecast_date"] <= end_ts)
-filtered = latest_preds.loc[mask]
-
-st.subheader("Filtered predictions")
-st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
-
-if not filtered.empty:
-    # Latest point metric (within selected range)
-    latest_row = filtered.iloc[-1]
-    st.metric("Latest AQI in range", f"{latest_row['us_aqi']:.0f}", help=latest_row["category"]) 
-
-    st.line_chart(filtered.set_index("forecast_date")["us_aqi"])
+if filtered_preds.empty:
+    st.warning("⚠️ No predictions available for the next 72 hours.")
 else:
-    st.warning("No data available for the selected time range.")
+    # === Show table ===
+    st.subheader("📊 Forecast Table (Next 72 Hours)")
+    st.dataframe(
+        filtered_preds[['datetime_utc', 'aqi']],
+        use_container_width=True
+    )
+
+    # === Plot line chart ===
+    st.subheader("📈 AQI Forecast Trend (Next 72 Hours)")
+    plt.figure(figsize=(10, 4))
+    plt.plot(filtered_preds['datetime_utc'], filtered_preds['aqi'], marker='o')
+    plt.axhline(50, color="green", linestyle="--", alpha=0.5)
+    plt.axhline(100, color="yellow", linestyle="--", alpha=0.5)
+    plt.axhline(150, color="orange", linestyle="--", alpha=0.5)
+    plt.axhline(200, color="red", linestyle="--", alpha=0.5)
+    plt.axhline(300, color="purple", linestyle="--", alpha=0.5)
+    plt.axhline(500, color="black", linestyle="--", alpha=0.5)
+
+    plt.xticks(rotation=45)
+    plt.ylabel("AQI")
+    plt.xlabel("Time (UTC)")
+    plt.title("Air Quality Forecast (Next 72 Hours)")
+    st.pyplot(plt)
