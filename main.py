@@ -3,8 +3,6 @@ import pandas as pd
 import hopsworks
 import os
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
-import pytz
 
 # --- Load environment variables from .env
 load_dotenv()
@@ -37,15 +35,6 @@ for col in ["forecast_date", "forecast_date_utc", "prediction_time"]:
 latest_run_time = df["prediction_time"].max()
 latest_preds = df[df["prediction_time"] == latest_run_time].copy()
 latest_preds = latest_preds.sort_values("forecast_date")
-
-# --- Filter: from now +1 hour to +72 hours ---
-now = datetime.now(pytz.timezone("Asia/Karachi"))
-start_limit = now + timedelta(hours=1)
-end_limit = now + timedelta(hours=72)
-latest_preds = latest_preds[
-    (latest_preds["forecast_date"] >= start_limit) &
-    (latest_preds["forecast_date"] <= end_limit)
-].copy()
 
 # --- Helper: AQI category ---
 def aqi_category(aqi: float) -> str:
@@ -123,4 +112,4 @@ if all_ts:
     else:
         st.warning("No data available for the selected time range.")
 else:
-    st.warning("No predictions available in the next 72 hours.")
+    st.warning("No predictions available.")
