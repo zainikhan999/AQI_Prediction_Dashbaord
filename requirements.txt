@@ -1,3 +1,4 @@
 streamlit
 hopsworks[python]
 pandas
+python-dotenv
