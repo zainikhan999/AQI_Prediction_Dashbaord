@@ -3,6 +3,7 @@ import pandas as pd
 import hopsworks
 import os
 from dotenv import load_dotenv
+import plotly.express as px
 
 # --- Load environment variables from .env
 load_dotenv()
@@ -36,8 +37,11 @@ latest_run_time = df["prediction_time"].max()
 latest_preds = df[df["prediction_time"] == latest_run_time].copy()
 latest_preds = latest_preds.sort_values("forecast_date")
 
+# --- Ensure integer AQI ---
+latest_preds["us_aqi"] = latest_preds["us_aqi"].round().astype(int)
+
 # --- Helper: AQI category ---
-def aqi_category(aqi: float) -> str:
+def aqi_category(aqi: int) -> str:
     if aqi <= 50:
         return "Good"
     elif aqi <= 100:
@@ -107,8 +111,20 @@ if all_ts:
 
     if not filtered.empty:
         latest_row = filtered.iloc[-1]
-        st.metric("Latest AQI in range", f"{latest_row['us_aqi']:.0f}", help=latest_row["category"]) 
-        st.line_chart(filtered.set_index("forecast_date")["us_aqi"])
+        st.metric("Latest AQI in range", f"{latest_row['us_aqi']}", help=latest_row["category"]) 
+
+        # --- Plot with hover showing both timestamp & AQI ---
+        fig = px.line(
+            filtered,
+            x="forecast_date",
+            y="us_aqi",
+            markers=True,
+            title="AQI Forecast (Latest Run)",
+            labels={"forecast_date": "Forecast Time", "us_aqi": "AQI"},
+            hover_data={"forecast_date": True, "us_aqi": True, "category": True}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
     else:
         st.warning("No data available for the selected time range.")
 else:
