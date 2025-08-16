@@ -114,13 +114,13 @@ if all_ts:
         now = pd.Timestamp.utcnow()
 
     # Find the row with datetime_utc closest to 'now'
-    latest_preds["time_diff"] = (latest_preds["datetime_utc"] - now).abs()
+    latest_preds["time_diff"] = (latest_preds["forecast_date_utc"] - now).abs()
     current_row = latest_preds.loc[latest_preds["time_diff"].idxmin()]
 
     st.metric(
         "Current Forecasted AQI",
         f"{int(current_row['us_aqi'])}",
-        help=f"Forecasted for {current_row['datetime_utc']}"
+        help=f"Forecasted for {current_row['forecast_date_utc']}"
     )
 
 
