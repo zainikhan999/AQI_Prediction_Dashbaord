@@ -2,3 +2,4 @@ streamlit
 hopsworks[python]
 pandas
 python-dotenv
+matplotlib
