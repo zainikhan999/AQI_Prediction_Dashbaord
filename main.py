@@ -109,12 +109,18 @@ if all_ts:
     st.subheader("Filtered predictions")
     st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
 
-    if not filtered.empty:
-        latest_row = filtered.iloc[-1]
-        st.metric("Latest AQI in range", f"{latest_row['us_aqi']}", help=latest_row["category"]) 
+    # === Get latest forecasted AQI ===
+    if not latest_preds.empty:
+         latest_forecast = latest_preds.iloc[0]  # since it's sorted by datetime
+         st.metric(
+                "Current Forecasted AQI",
+                f"{latest_forecast['prediction']:.0f}",
+                help=f"Forecasted for {latest_forecast['datetime_utc']}"
+    )
+
 
         # --- Plot with hover showing both timestamp & AQI ---
-        fig = px.line(
+    fig = px.line(
             filtered,
             x="forecast_date",
             y="us_aqi",
