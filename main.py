@@ -4,6 +4,7 @@ import hopsworks
 import os
 from dotenv import load_dotenv
 import plotly.express as px
+import datetime
 
 # --- Load environment variables from .env
 load_dotenv()
@@ -110,12 +111,18 @@ if all_ts:
     st.dataframe(filtered[["forecast_date", "us_aqi", "category"]])
 
     if not latest_preds.empty:
-        latest_forecast = latest_preds.iloc[0]  # since it's sorted by datetime
-        st.metric(
-            "Current Forecasted AQI",
-            f"{latest_forecast['us_aqi']}",
-            help=f"Forecasted for {latest_forecast['forecast_date']}"
-        )
+        now = pd.Timestamp.utcnow()
+
+    # Find the row with datetime_utc closest to 'now'
+    latest_preds["time_diff"] = (latest_preds["datetime_utc"] - now).abs()
+    current_row = latest_preds.loc[latest_preds["time_diff"].idxmin()]
+
+    st.metric(
+        "Current Forecasted AQI",
+        f"{int(current_row['us_aqi'])}",
+        help=f"Forecasted for {current_row['datetime_utc']}"
+    )
+
 
     # --- Plot with hover showing both timestamp & AQI ---
     if not filtered.empty:
