@@ -58,7 +58,7 @@ def aqi_category(aqi: int) -> str:
 latest_preds["category"] = latest_preds["us_aqi"].apply(aqi_category)
 
 # --- UI ---
-st.title("🌍 AQI Forecast Dashboard")
+st.title("🌍 Rawalpindi AQI Forecast Dashboard")
 st.write("Showing the latest forecast from model (times in Asia/Karachi · PKT)")
 
 # AQI legend
