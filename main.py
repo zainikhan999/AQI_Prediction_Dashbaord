@@ -15,7 +15,7 @@ project = hopsworks.login(api_key_value=API_KEY, project="weather_aqi")
 fs = project.get_feature_store()
 
 # Load predictions feature group (updated to match pipeline)
-fg = fs.get_feature_group(name="aqi_predictions_72h", version=1)
+fg = fs.get_feature_group(name="aqi_predictions", version=1)
 
 # Read as dataframe
 df = fg.read()
