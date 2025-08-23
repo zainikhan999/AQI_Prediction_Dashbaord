@@ -3,6 +3,7 @@
 
 This project predicts the **Air Quality Index (AQI)** for **3+ days ahead** in Rawalpindi using advanced machine learning and deep learning models.  
 It was developed during my internship at **10Pearls Pakistan** under the **Shine Internship Program**.
+<br>
 Live Link: **https://rawalpindiaqiprediction.streamlit.app/**
 
 ---
@@ -25,6 +26,7 @@ Live Link: **https://rawalpindiaqiprediction.streamlit.app/**
   - Predictions **80–90% correlated** with official API forecasts
 
 ---
+
 
 
 
