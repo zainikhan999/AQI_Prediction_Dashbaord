@@ -1,5 +1,5 @@
 # ===================================================================
-# AQI Streamlit Dashboard - Enhanced for Inference Pipeline Integration
+# AQI Streamlit Dashboard - FIXED VERSION
 # ===================================================================
 
 import streamlit as st
@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import json
+import pytz
 
 # Set page config
 st.set_page_config(
@@ -47,6 +48,27 @@ def load_predictions_data():
     except Exception as e:
         return None, str(e)
 
+@st.cache_data
+def load_backup_csv():
+    """Try to load from local CSV backup files."""
+    csv_files = [
+        'predictions_20250824_204610.csv',
+        'predictions.csv', 
+        'latest_predictions.csv',
+        'aqi_predictions.csv'
+    ]
+    
+    for filename in csv_files:
+        try:
+            if os.path.exists(filename):
+                df = pd.read_csv(filename)
+                st.info(f"📁 Loaded data from local file: {filename}")
+                return df, None
+        except Exception as e:
+            continue
+    
+    return None, "No CSV backup files found"
+
 def aqi_category(aqi: int) -> str:
     """Get AQI category from AQI value."""
     if aqi <= 50:
@@ -75,75 +97,167 @@ def aqi_color(aqi: int) -> str:
         return "#8F3F97"  # Purple
     return "#7E0023"  # Maroon
 
-def format_timestamp(ts):
-    """Format timestamp for display."""
+def format_timestamp_pkt(ts):
+    """Format timestamp for PKT display."""
     if pd.isna(ts):
         return "N/A"
-    return ts.strftime("%Y-%m-%d %H:%M:%S %Z")
+    
+    # Convert to PKT timezone
+    pkt_tz = pytz.timezone('Asia/Karachi')
+    if ts.tz is None:
+        ts = pytz.utc.localize(ts)
+    pkt_time = ts.astimezone(pkt_tz)
+    return pkt_time.strftime("%Y-%m-%d %H:%M:%S PKT")
+
+def format_timestamp_utc(ts):
+    """Format timestamp for UTC display."""
+    if pd.isna(ts):
+        return "N/A"
+    if ts.tz is None:
+        ts = pytz.utc.localize(ts)
+    return ts.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 # --- Main App ---
 def main():
     # Header
     st.title("🌍 Rawalpindi AQI Forecast Dashboard")
     st.markdown("Real-time **74-hour AQI forecasts** powered by LightGBM ML model")
+    st.markdown("📍 **Location:** Rawalpindi, Punjab, Pakistan (33.5973°N, 73.0479°E)")
     
     # Sidebar
     st.sidebar.header("📊 Dashboard Controls")
-    auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (5 min)", value=True)
+    data_source = st.sidebar.selectbox(
+        "📂 Data Source",
+        options=["Feature Store", "Local CSV Backup"],
+        index=0
+    )
+    auto_refresh = st.sidebar.checkbox("🔄 Auto-refresh (5 min)", value=False)
     show_advanced = st.sidebar.checkbox("🔧 Advanced Options", value=False)
     
-    # Load data
+    # Load data based on selected source
     with st.spinner("🔄 Loading latest predictions..."):
-        df, error = load_predictions_data()
+        if data_source == "Feature Store":
+            df, error = load_predictions_data()
+        else:
+            df, error = load_backup_csv()
     
     if error:
         st.error(f"❌ Failed to load data: {error}")
-        st.info("💡 Make sure the inference pipeline has run successfully and predictions are available.")
-        return
+        if data_source == "Feature Store":
+            st.info("💡 Try loading from 'Local CSV Backup' or make sure the inference pipeline has run successfully.")
+        else:
+            st.info("💡 Make sure you have a predictions CSV file in the current directory.")
+        
+        # Try alternative source
+        st.markdown("### 🔄 Trying Alternative Data Source...")
+        if data_source == "Feature Store":
+            df, error2 = load_backup_csv()
+            if df is not None:
+                st.success("✅ Successfully loaded from local CSV backup!")
+            else:
+                st.error("❌ No data available from any source.")
+                return
+        else:
+            df, error2 = load_predictions_data()
+            if df is not None:
+                st.success("✅ Successfully loaded from feature store!")
+            else:
+                st.error("❌ No data available from any source.")
+                return
     
     if df is None or len(df) == 0:
         st.warning("⚠️ No prediction data available.")
-        st.info("🚀 Run the inference pipeline to generate predictions: `python aqi_inference_pipeline.py`")
+        st.info("🚀 Run the inference pipeline to generate predictions: `python inference_pipeline.py`")
         return
     
     # --- Data Processing ---
-    # Standardize columns (matching inference pipeline output)
-    df = df.rename(columns={
-        "datetime_utc": "forecast_date_utc",
-        "datetime": "forecast_date_local",
-        "predicted_us_aqi": "us_aqi",
-        "prediction_date": "prediction_time",
-    })
+    st.sidebar.markdown("---")
+    st.sidebar.info(f"📊 **Records loaded:** {len(df)}")
+    st.sidebar.info(f"📂 **Data source:** {data_source}")
     
-    # Parse datetimes safely
-    for col in ["forecast_date_utc", "forecast_date_local", "prediction_time"]:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
+    # Display raw column names for debugging
+    if st.sidebar.checkbox("🔍 Debug: Show column names"):
+        st.sidebar.write("**Columns in dataset:**")
+        st.sidebar.write(list(df.columns))
     
-    # Ensure timezone handling
-    if "forecast_date_utc" in df.columns:
-        df["forecast_date_utc"] = pd.to_datetime(df["forecast_date_utc"], utc=True)
-        df["forecast_date_local"] = df["forecast_date_utc"].dt.tz_convert("Asia/Karachi")
+    # Standardize column names based on what we actually have
+    column_mapping = {}
     
-    if "prediction_time" in df.columns:
-        df["prediction_time"] = pd.to_datetime(df["prediction_time"], utc=True).dt.tz_convert("Asia/Karachi")
+    # Try to identify datetime columns
+    datetime_cols = [col for col in df.columns if 'datetime' in col.lower() or 'time' in col.lower()]
+    aqi_cols = [col for col in df.columns if 'aqi' in col.lower()]
     
-    # Keep only latest prediction run
-    if "prediction_time" in df.columns:
-        latest_run_time = df["prediction_time"].max()
-        latest_preds = df[df["prediction_time"] == latest_run_time].copy()
+    # Smart column mapping
+    for col in df.columns:
+        if 'datetime_utc' in col.lower():
+            column_mapping[col] = 'forecast_date_utc'
+        elif 'datetime' in col.lower() and 'utc' not in col.lower():
+            column_mapping[col] = 'forecast_date_local'
+        elif 'predicted_us_aqi' in col.lower():
+            column_mapping[col] = 'us_aqi'
+        elif 'prediction_date' in col.lower():
+            column_mapping[col] = 'prediction_time'
+        elif 'model_version' in col.lower():
+            column_mapping[col] = 'model_version'
+        elif 'forecast_hour' in col.lower():
+            column_mapping[col] = 'forecast_hour'
+    
+    # Apply mapping
+    df = df.rename(columns=column_mapping)
+    
+    # Ensure we have required columns
+    if 'us_aqi' not in df.columns and aqi_cols:
+        df['us_aqi'] = df[aqi_cols[0]]
+    
+    if 'forecast_date_utc' not in df.columns and datetime_cols:
+        df['forecast_date_utc'] = df[datetime_cols[0]]
+    
+    # Parse datetimes with better error handling
+    pkt_tz = pytz.timezone('Asia/Karachi')
+    utc_tz = pytz.UTC
+    
+    if 'forecast_date_utc' in df.columns:
+        df['forecast_date_utc'] = pd.to_datetime(df['forecast_date_utc'], errors='coerce')
+        # Ensure UTC timezone
+        if df['forecast_date_utc'].dt.tz is None:
+            df['forecast_date_utc'] = df['forecast_date_utc'].dt.tz_localize('UTC')
+        else:
+            df['forecast_date_utc'] = df['forecast_date_utc'].dt.tz_convert('UTC')
+        
+        # Create PKT version
+        df['forecast_date_pkt'] = df['forecast_date_utc'].dt.tz_convert('Asia/Karachi')
+    
+    if 'prediction_time' in df.columns:
+        df['prediction_time'] = pd.to_datetime(df['prediction_time'], errors='coerce')
+        if df['prediction_time'].dt.tz is None:
+            df['prediction_time'] = df['prediction_time'].dt.tz_localize('UTC')
+        df['prediction_time'] = df['prediction_time'].dt.tz_convert('Asia/Karachi')
+    
+    # Keep only latest prediction run if we have prediction_time
+    if 'prediction_time' in df.columns and not df['prediction_time'].isna().all():
+        latest_run_time = df['prediction_time'].max()
+        latest_preds = df[df['prediction_time'] == latest_run_time].copy()
     else:
         latest_preds = df.copy()
         latest_run_time = "Unknown"
     
-    latest_preds = latest_preds.sort_values("forecast_date_utc").reset_index(drop=True)
+    # Sort by forecast time
+    if 'forecast_date_utc' in latest_preds.columns:
+        latest_preds = latest_preds.sort_values('forecast_date_utc').reset_index(drop=True)
+    elif 'forecast_date_pkt' in latest_preds.columns:
+        latest_preds = latest_preds.sort_values('forecast_date_pkt').reset_index(drop=True)
     
-    # Ensure integer AQI
-    latest_preds["us_aqi"] = latest_preds["us_aqi"].round().astype(int)
-    latest_preds["category"] = latest_preds["us_aqi"].apply(aqi_category)
-    latest_preds["color"] = latest_preds["us_aqi"].apply(aqi_color)
+    # Ensure integer AQI and add categories
+    if 'us_aqi' in latest_preds.columns:
+        latest_preds['us_aqi'] = pd.to_numeric(latest_preds['us_aqi'], errors='coerce').fillna(0).round().astype(int)
+        latest_preds['category'] = latest_preds['us_aqi'].apply(aqi_category)
+        latest_preds['color'] = latest_preds['us_aqi'].apply(aqi_color)
+    else:
+        st.error("❌ No AQI column found in the data!")
+        return
     
     # --- Dashboard Metrics ---
+    st.markdown("---")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -152,21 +266,22 @@ def main():
     
     with col2:
         if total_predictions > 0:
-            avg_aqi = latest_preds["us_aqi"].mean()
+            avg_aqi = latest_preds['us_aqi'].mean()
             st.metric("📈 Average AQI", f"{avg_aqi:.0f}")
         else:
             st.metric("📈 Average AQI", "N/A")
     
     with col3:
         if total_predictions > 0:
-            max_aqi = latest_preds["us_aqi"].max()
-            st.metric("🔺 Peak AQI", max_aqi)
+            max_aqi = latest_preds['us_aqi'].max()
+            min_aqi = latest_preds['us_aqi'].min()
+            st.metric("🔺 AQI Range", f"{min_aqi} - {max_aqi}")
         else:
-            st.metric("🔺 Peak AQI", "N/A")
+            st.metric("🔺 AQI Range", "N/A")
     
     with col4:
-        if "model_version" in latest_preds.columns:
-            model_version = latest_preds["model_version"].iloc[0] if total_predictions > 0 else "Unknown"
+        if 'model_version' in latest_preds.columns:
+            model_version = latest_preds['model_version'].iloc[0] if total_predictions > 0 else "Unknown"
             st.metric("🤖 Model Version", model_version)
         else:
             st.metric("🤖 Model Version", "Unknown")
@@ -176,13 +291,16 @@ def main():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.info(f"🕒 **Latest Prediction Run:** {format_timestamp(latest_run_time)}")
+        if latest_run_time != "Unknown":
+            st.info(f"🕒 **Latest Prediction Run:** {format_timestamp_pkt(latest_run_time)}")
+        else:
+            st.info("🕒 **Latest Prediction Run:** Unknown")
     
     with col2:
-        if total_predictions > 0:
-            forecast_start = latest_preds["forecast_date_local"].min()
-            forecast_end = latest_preds["forecast_date_local"].max()
-            st.info(f"📅 **Forecast Range:** {format_timestamp(forecast_start)} to {format_timestamp(forecast_end)}")
+        if total_predictions > 0 and 'forecast_date_pkt' in latest_preds.columns:
+            forecast_start = latest_preds['forecast_date_pkt'].min()
+            forecast_end = latest_preds['forecast_date_pkt'].max()
+            st.info(f"📅 **Forecast Range:** {format_timestamp_pkt(forecast_start)} to {format_timestamp_pkt(forecast_end)}")
     
     # --- AQI Legend ---
     st.markdown("---")
@@ -200,9 +318,10 @@ def main():
     
     for i, (category, range_str, color) in enumerate(aqi_ranges):
         with legend_cols[i]:
+            text_color = 'white' if color in ['#FF0000', '#8F3F97', '#7E0023'] else 'black'
             st.markdown(f"""
-            <div style="background-color: {color}; padding: 10px; border-radius: 5px; text-align: center; color: {'white' if color in ['#FF0000', '#8F3F97', '#7E0023'] else 'black'}">
-                <strong>{category}</strong><br>{range_str}
+            <div style="background-color: {color}; padding: 10px; border-radius: 5px; text-align: center; color: {text_color}; margin: 2px;">
+                <strong>{category}</strong><br><small>{range_str}</small>
             </div>
             """, unsafe_allow_html=True)
     
@@ -210,105 +329,80 @@ def main():
         st.warning("⚠️ No predictions to display. Please run the inference pipeline first.")
         return
     
-    # --- Time Range Selection ---
-    st.markdown("---")
-    st.markdown("### 🕒 Time Range Selection")
-    
-    all_timestamps = list(latest_preds["forecast_date_local"].unique())
-    all_timestamps.sort()
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_ts = st.selectbox(
-            "📅 Start Time",
-            options=all_timestamps,
-            index=0,
-            format_func=lambda x: x.strftime("%Y-%m-%d %H:%M:%S %Z"),
-            key="start_time"
-        )
-    with col2:
-        end_ts = st.selectbox(
-            "📅 End Time",
-            options=all_timestamps,
-            index=len(all_timestamps) - 1,
-            format_func=lambda x: x.strftime("%Y-%m-%d %H:%M:%S %Z"),
-            key="end_time"
-        )
-    
-    if start_ts > end_ts:
-        st.warning("⚠️ Start time is after end time — swapping them.")
-        start_ts, end_ts = end_ts, start_ts
-    
-    # Filter predictions
-    mask = (latest_preds["forecast_date_local"] >= start_ts) & (latest_preds["forecast_date_local"] <= end_ts)
-    filtered = latest_preds.loc[mask].reset_index(drop=True)
-    
     # --- Current AQI Display ---
     st.markdown("---")
     st.markdown("### 🎯 Current Forecasted AQI")
     
-    now = pd.Timestamp.now(tz="Asia/Karachi")
-    latest_preds["time_diff"] = (latest_preds["forecast_date_local"] - now).abs()
-    current_row = latest_preds.loc[latest_preds["time_diff"].idxmin()]
-    
-    current_aqi = int(current_row["us_aqi"])
-    current_category = current_row["category"]
-    current_color = current_row["color"]
-    current_time = current_row["forecast_date_local"]
-    
-    # Large AQI display
-    st.markdown(f"""
-    <div style="background-color: {current_color}; padding: 30px; border-radius: 15px; text-align: center; margin: 20px 0; color: {'white' if current_color in ['#FF0000', '#8F3F97', '#7E0023'] else 'black'}">
-        <h1 style="margin: 0; font-size: 4em;">{current_aqi}</h1>
-        <h2 style="margin: 10px 0;">{current_category}</h2>
-        <p style="margin: 0; font-size: 1.2em;">Forecasted for {format_timestamp(current_time)}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if 'forecast_date_pkt' in latest_preds.columns:
+        # Find closest forecast to current time
+        now = pd.Timestamp.now(tz='Asia/Karachi')
+        latest_preds['time_diff'] = (latest_preds['forecast_date_pkt'] - now).abs()
+        current_idx = latest_preds['time_diff'].idxmin()
+        current_row = latest_preds.loc[current_idx]
+        
+        current_aqi = int(current_row['us_aqi'])
+        current_category = current_row['category']
+        current_color = current_row['color']
+        current_time = current_row['forecast_date_pkt']
+        
+        # Large AQI display
+        text_color = 'white' if current_color in ['#FF0000', '#8F3F97', '#7E0023'] else 'black'
+        st.markdown(f"""
+        <div style="background-color: {current_color}; padding: 30px; border-radius: 15px; text-align: center; margin: 20px 0; color: {text_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+            <h1 style="margin: 0; font-size: 4em; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">{current_aqi}</h1>
+            <h2 style="margin: 10px 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">{current_category}</h2>
+            <p style="margin: 0; font-size: 1.2em;">Forecasted for {format_timestamp_pkt(current_time)}</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     # --- Main Forecast Chart ---
     st.markdown("---")
     st.markdown("### 📈 74-Hour AQI Forecast")
     
-    if len(filtered) > 0:
+    if len(latest_preds) > 0 and 'forecast_date_pkt' in latest_preds.columns:
         # Create enhanced plotly chart
         fig = go.Figure()
         
         # Add line trace
         fig.add_trace(go.Scatter(
-            x=filtered["forecast_date_local"],
-            y=filtered["us_aqi"],
+            x=latest_preds['forecast_date_pkt'],
+            y=latest_preds['us_aqi'],
             mode='lines+markers',
             name='Predicted AQI',
             line=dict(width=3, color='#1f77b4'),
-            marker=dict(size=8),
+            marker=dict(size=6, color=latest_preds['us_aqi'], 
+                       colorscale=[[0, '#00E400'], [0.2, '#FFFF00'], [0.4, '#FF7E00'], 
+                                  [0.6, '#FF0000'], [0.8, '#8F3F97'], [1, '#7E0023']],
+                       cmin=0, cmax=300),
             hovertemplate='<b>Time:</b> %{x}<br><b>AQI:</b> %{y}<br><b>Category:</b> %{text}<extra></extra>',
-            text=filtered["category"]
+            text=latest_preds['category']
         ))
         
         # Add AQI threshold lines
-        aqi_thresholds = [50, 100, 150, 200, 300]
-        threshold_colors = ['#00E400', '#FFFF00', '#FF7E00', '#FF0000', '#8F3F97']
+        aqi_thresholds = [(50, '#00E400', 'Good'), (100, '#FFFF00', 'Moderate'), 
+                         (150, '#FF7E00', 'Unhealthy for Sensitive'), (200, '#FF0000', 'Unhealthy'), 
+                         (300, '#8F3F97', 'Very Unhealthy')]
         
-        for i, (threshold, color) in enumerate(zip(aqi_thresholds, threshold_colors)):
+        for threshold, color, label in aqi_thresholds:
             fig.add_hline(
                 y=threshold, 
                 line_dash="dash", 
                 line_color=color, 
-                opacity=0.3,
-                annotation_text=f"AQI {threshold}",
+                opacity=0.4,
+                annotation_text=f"{label} ({threshold})",
                 annotation_position="right"
             )
         
         # Update layout
         fig.update_layout(
             title="74-Hour AQI Forecast - Rawalpindi, Pakistan",
-            xaxis_title="Forecast Time (Asia/Karachi)",
+            xaxis_title="Forecast Time (Pakistan Time - PKT)",
             yaxis_title="US AQI",
-            height=500,
+            height=600,
             hovermode='x unified',
             showlegend=True,
             xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)'),
-            yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)'),
+            yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', range=[0, max(350, latest_preds['us_aqi'].max() + 50)]),
             plot_bgcolor='rgba(0,0,0,0)',
         )
         
@@ -324,70 +418,105 @@ def main():
             with col1:
                 # AQI distribution
                 fig_hist = px.histogram(
-                    filtered, 
-                    x="us_aqi", 
+                    latest_preds, 
+                    x='us_aqi', 
                     nbins=20,
                     title="AQI Distribution",
-                    labels={"us_aqi": "US AQI", "count": "Frequency"}
+                    labels={'us_aqi': 'US AQI', 'count': 'Frequency'},
+                    color_discrete_sequence=['#1f77b4']
                 )
+                fig_hist.update_layout(height=400)
                 st.plotly_chart(fig_hist, use_container_width=True)
             
             with col2:
                 # Category breakdown
-                category_counts = filtered["category"].value_counts()
+                category_counts = latest_preds['category'].value_counts()
                 fig_pie = px.pie(
                     values=category_counts.values,
                     names=category_counts.index,
-                    title="AQI Categories Distribution"
+                    title="AQI Categories Distribution",
+                    color_discrete_map={
+                        'Good': '#00E400',
+                        'Moderate': '#FFFF00', 
+                        'Unhealthy for Sensitive Groups': '#FF7E00',
+                        'Unhealthy': '#FF0000',
+                        'Very Unhealthy': '#8F3F97',
+                        'Hazardous': '#7E0023'
+                    }
                 )
+                fig_pie.update_layout(height=400)
                 st.plotly_chart(fig_pie, use_container_width=True)
         
         # --- Data Table ---
         st.markdown("---")
         st.markdown("### 📋 Detailed Forecast Table")
         
-        # Prepare display dataframe
-        display_df = filtered[["forecast_date_local", "us_aqi", "category"]].copy()
-        display_df["forecast_date_local"] = display_df["forecast_date_local"].dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-        display_df = display_df.rename(columns={
-            "forecast_date_local": "Forecast Time (PKT)",
-            "us_aqi": "AQI",
-            "category": "Category"
-        })
+        # Prepare display dataframe - FIXED to show actual values
+        display_df = latest_preds.copy()
+        
+        # Select and format columns for display
+        display_cols = ['forecast_date_pkt', 'us_aqi', 'category']
+        if 'forecast_hour' in display_df.columns:
+            display_cols.insert(1, 'forecast_hour')
+        
+        display_df = display_df[display_cols].copy()
+        display_df['forecast_date_pkt'] = display_df['forecast_date_pkt'].dt.strftime("%Y-%m-%d %H:%M:%S PKT")
+        
+        # Rename columns for display
+        column_rename = {
+            'forecast_date_pkt': 'Forecast Time (PKT)',
+            'us_aqi': 'AQI Value',
+            'category': 'AQI Category',
+            'forecast_hour': 'Hour +'
+        }
+        display_df = display_df.rename(columns=column_rename)
+        
+        # FIXED: Use number column config instead of progress bars
+        column_config = {
+            'AQI Value': st.column_config.NumberColumn(
+                'AQI Value',
+                help='US Air Quality Index (0-500)',
+                min_value=0,
+                max_value=500,
+                format='%d'
+            )
+        }
+        
+        if 'Hour +' in display_df.columns:
+            column_config['Hour +'] = st.column_config.NumberColumn(
+                'Hour +',
+                help='Hours from now',
+                min_value=0,
+                format='%d'
+            )
         
         st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "AQI": st.column_config.ProgressColumn(
-                    "AQI",
-                    help="US Air Quality Index",
-                    min_value=0,
-                    max_value=500,
-                ),
-            }
+            column_config=column_config
         )
         
         # Download button
-        csv = filtered.to_csv(index=False)
+        csv = latest_preds.to_csv(index=False)
         st.download_button(
             label="📥 Download Forecast Data (CSV)",
             data=csv,
-            file_name=f"aqi_forecast_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"aqi_forecast_rawalpindi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
         
     else:
-        st.warning("⚠️ No data available for the selected time range.")
+        st.warning("⚠️ No forecast data available to display.")
     
     # --- Footer ---
     st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #888; padding: 20px;">
-        <p>🤖 Powered by LightGBM ML Model | 📊 Data from Hopsworks Feature Store</p>
-        <p>🌍 Location: Rawalpindi, Pakistan (33.5973°N, 73.0479°E)</p>
-        <p>⚡ Auto-refreshes every 5 minutes when enabled</p>
+    st.markdown(f"""
+    <div style="text-align: center; color: #666; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 20px;">
+        <p><strong>🤖 Powered by LightGBM ML Model | 📊 Data from Hopsworks Feature Store</strong></p>
+        <p><strong>🌍 Location: Rawalpindi, Punjab, Pakistan</strong> (33.5973°N, 73.0479°E)</p>
+        <p>⚡ Last updated: {datetime.now(pytz.timezone('Asia/Karachi')).strftime('%Y-%m-%d %H:%M:%S PKT')}</p>
+        <p>📊 Showing {total_predictions} forecast points | 🕒 All times in Pakistan Time (PKT)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -395,7 +524,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Auto-refresh functionality
+# Auto-refresh functionality (only if enabled)
 if st.sidebar.checkbox("🔄 Auto-refresh (5 min)", value=False):
     import time
     time.sleep(300)  # 5 minutes
