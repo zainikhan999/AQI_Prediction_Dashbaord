@@ -523,9 +523,3 @@ def main():
 # --- Run App ---
 if __name__ == "__main__":
     main()
-
-# Auto-refresh functionality (only if enabled)
-if st.sidebar.checkbox("🔄 Auto-refresh (5 min)", value=False):
-    import time
-    time.sleep(300)  # 5 minutes
-    st.rerun()
