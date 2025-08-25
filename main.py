@@ -42,8 +42,8 @@ def load_predictions_data():
         
         # Load predictions feature group
        # Load predictions feature group (aligned with inference pipeline)
-         fg = fs.get_feature_group(name="aqi_forecast_metrics_fg", version=1)
-         df = fg.read()
+        fg = fs.get_feature_group(name="aqi_forecast_metrics_fg", version=1)
+        df = fg.read()
 
         return df, None
     except Exception as e:
