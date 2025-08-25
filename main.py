@@ -195,7 +195,21 @@ def main():
         st.sidebar.write(list(df.columns))
     
     # Standardize column names based on what we actually have
-    column_mapping = {}
+    # --- Column Mapping (based on actual FG schema) ---
+    column_mapping = {
+    'datetime': 'forecast_date_utc',
+    'predicted_us_aqi': 'us_aqi',
+    'us_aqi_forecast': 'us_aqi_baseline'
+     }
+
+    df = df.rename(columns=column_mapping)
+
+# Ensure datetime parsing
+    if 'forecast_date_utc' in df.columns:
+       df['forecast_date_utc'] = pd.to_datetime(df['forecast_date_utc'], errors='coerce')
+       df['forecast_date_utc'] = df['forecast_date_utc'].dt.tz_localize('UTC', nonexistent='NaT', ambiguous='NaT')
+       df['forecast_date_pkt'] = df['forecast_date_utc'].dt.tz_convert('Asia/Karachi')
+
     
     # Try to identify datetime columns
     datetime_cols = [col for col in df.columns if 'datetime' in col.lower() or 'time' in col.lower()]
