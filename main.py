@@ -237,8 +237,6 @@ def main():
     if 'us_aqi' not in df.columns and aqi_cols:
         df['us_aqi'] = df[aqi_cols[0]]
     
-    if 'forecast_date_utc' not in df.columns and datetime_cols:
-        df['forecast_date_utc'] = df[datetime_cols[0]]
     
     # Parse datetimes with better error handling
     pkt_tz = pytz.timezone('Asia/Karachi')
