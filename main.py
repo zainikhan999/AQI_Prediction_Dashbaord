@@ -32,18 +32,31 @@ if not API_KEY:
     st.stop()
 
 # --- Helper Functions ---
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def load_predictions_data():
     """Load predictions data from Hopsworks feature store."""
     try:
-        # Connect to Hopsworks
-        project = hopsworks.login(api_key_value=API_KEY, project="weather_aqi")
+        # 🔑 Connect to your actual project (default one with API key)
+        project = hopsworks.login(api_key_value=API_KEY)
         fs = project.get_feature_store()
-        
-        # Load predictions feature group
-       # Load predictions feature group (aligned with inference pipeline)
-        fg = fs.get_feature_group(name="aqi_forecast_metrics_fg", version=1)
+
+        # ✅ Auto-detect latest version of FG
+        fg_info = fs.get_feature_groups(name="aqi_forecast_metrics_fg")
+        if not fg_info:
+            return None, "Feature group 'aqi_forecast_metrics_fg' not found!"
+
+        latest_version = max(fg.version for fg in fg_info)
+        fg = fs.get_feature_group(name="aqi_forecast_metrics_fg", version=latest_version)
+
+        if fg is None:
+            return None, f"FG 'aqi_forecast_metrics_fg' (v{latest_version}) not found"
+
+        # ✅ Read into pandas dataframe
         df = fg.read()
+
+        # Ensure pandas dataframe is not empty
+        if df is None or len(df) == 0:
+            return None, "Feature group is empty. Run inference pipeline first."
 
         return df, None
     except Exception as e:
